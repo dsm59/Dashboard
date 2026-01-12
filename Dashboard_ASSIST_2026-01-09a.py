@@ -201,7 +201,7 @@ with st.sidebar.expander("Upload files", expanded=True):
         st.success("Data processed!")
 
 if not (ofi_files or issue_files):
-    st.info("For this programme to continue, you are required to upload at least one: OFI file, or Issues file.")
+    st.info("To continue, please upload at least one: OFI file, or Issues file.")
     st.stop()
 
 # --------------------------------------------------
@@ -928,4 +928,5 @@ with tab_customer:
 # --------------------------------------------------
 with st.expander("Data Preview"):
     st.dataframe(filtered, width='stretch')
+
 
