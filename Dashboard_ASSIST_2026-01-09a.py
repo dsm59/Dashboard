@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 OFI Analysis Dashboard
-OPTIONS FOR WHETHER TO INCLUDE COMPLAINTS, OFIs OR BOTH
-
 @author: Daniel
 """
 
@@ -930,3 +928,4 @@ with tab_customer:
 # --------------------------------------------------
 with st.expander("Data Preview"):
     st.dataframe(filtered, width='stretch')
+
