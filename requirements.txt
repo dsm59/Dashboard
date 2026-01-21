@@ -2,4 +2,5 @@ pandas
 streamlit>=1.40.0
 plotly
 numpy
+matplotlib
 
