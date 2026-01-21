@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 OFI Analysis Dashboard
+OPTIONS FOR WHETHER TO INCLUDE COMPLAINTS, OFIs OR BOTH
+
 @author: Daniel
 """
 
@@ -201,7 +203,7 @@ with st.sidebar.expander("Upload files", expanded=True):
         st.success("Data processed!")
 
 if not (ofi_files or issue_files):
-    st.info("To continue, please upload at least one: OFI file, or Issues file.")
+    st.info("For this programme to continue, you are required to upload at least one: OFI file, or Issues file.")
     st.stop()
 
 # --------------------------------------------------
@@ -245,6 +247,9 @@ with st.sidebar.form("filters"):
         
     if len(date_range) == 2:
         start_date, end_date = date_range
+    
+    classes = df['Classification'].dropna().unique()
+    selected_classes = st.multiselect("Select relevent classifications", classes, default=classes)
 
     submitted = st.form_submit_button("Apply Filters")
 
@@ -282,6 +287,8 @@ filtered = filtered_nodate[
     (filtered_nodate["Date"] >= start_ts) &
     (filtered_nodate["Date"] < end_ts)
 ]
+
+filtered  = filtered[filtered['Classification'].isin(selected_classes)]
 
 # --------------------------------------------------
 # KPI ROW 
@@ -386,7 +393,7 @@ with tab_geo:
                 .reset_index(name='Total_OFIs')
             )
         
-            fig_map = px.scatter_mapbox(
+            fig_map = px.scatter_map(
                 map_df,
                 lat="Latitude",
                 lon="Longitude",
@@ -816,12 +823,15 @@ with tab_customer:
             .reset_index(name="OFI Count")
             .sort_values("OFI Count", ascending=False)
         )
-    
+        
+        client_counts = client_counts.reset_index()
+                
         client_counts["label"] = (
-            client_counts["Client"] +
+            (client_counts.index+1).astype(str) + ".  " + 
+            client_counts["Client"] + 
             " (" + client_counts["OFI Count"].astype(str) + ")"
         )
-        
+
         selected_label = st.selectbox(
             "Select Client (sorted by OFIs)",
             client_counts["label"]
@@ -928,5 +938,3 @@ with tab_customer:
 # --------------------------------------------------
 with st.expander("Data Preview"):
     st.dataframe(filtered, width='stretch')
-
-
