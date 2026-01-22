@@ -197,14 +197,39 @@ with st.sidebar.expander("Upload files", expanded=True):
     issue_files = st.file_uploader("Issues export (.tsv)", type=["tsv"], accept_multiple_files=True)
     loc_file = st.file_uploader("Locations file (.csv)", type=["csv"])
     lob_file = st.file_uploader("LoB & BC file (.csv)", type=["csv"])
-    
-    if st.button("Process Uploaded Files"):
-        st.session_state.df = load_data(ofi_files, issue_files, lob_file, loc_file)
-        st.success("Data processed!")
 
-if not (ofi_files or issue_files):
-    st.info("For this programme to continue, you are required to upload at least one: OFI file, or Issues file.")
-    st.stop()
+    
+    # --------------------------------------------------
+    # Session state managements
+    # --------------------------------------------------
+    
+    def file_signature(ofi, issues, loc, lob):
+        return (
+            tuple(f.name for f in ofi) if ofi else (),
+            tuple(f.name for f in issues) if issues else (),
+            loc.name if loc else None,
+            lob.name if lob else None,
+        )
+
+    
+    if "df" not in st.session_state:
+        st.session_state.df = None
+
+    if "last_signature" not in st.session_state:
+        st.session_state.last_signature = None
+
+    current_signature = file_signature(ofi_files, issue_files, loc_file, lob_file)
+
+    process_clicked = st.button("Process Uploaded Files")
+    
+    if current_signature != st.session_state.last_signature and (ofi_files or issue_files):
+        st.session_state.df = load_data(ofi_files, issue_files, lob_file, loc_file)
+        st.session_state.last_signature = current_signature
+        st.toast("Files updated", icon="📁")
+
+    if st.session_state.df is None:
+        st.info("Upload files and click 'Process Uploaded Files' to begin.")
+        st.stop()
 
 # --------------------------------------------------
 # DATA LOADING & PRE-PROCESSING
@@ -220,23 +245,30 @@ df = st.session_state.df
 # --------------------------------------------------
 # SIDEBAR FILTERS
 # --------------------------------------------------
+
+if "filters_applied" not in st.session_state:
+    st.session_state.filters_applied = False
+
 with st.sidebar.form("filters"):
     st.header("Filters")
-    
-    # filters only show if the file was uploaded
-    if 'LOB' in df.columns:
-        lobs = sorted(df['LOB'].dropna().unique())
+
+    # ----- Conditional filters -----
+    if "LOB" in df.columns:
+        lobs = sorted(df["LOB"].dropna().unique())
         selected_lobs = st.multiselect("LOB", lobs, default=lobs)
+    else:
+        selected_lobs = None
 
-    if 'Revenue' in df.columns:
-        revenues = sorted(df['Revenue'].dropna().unique())
+    if "Revenue" in df.columns:
+        revenues = sorted(df["Revenue"].dropna().unique())
         selected_revenue = st.multiselect("Revenue Tier", revenues, default=revenues)
+    else:
+        selected_revenue = None
 
-    min_date = df['Date'].min().date()
+    # ----- Date range -----
+    min_date = df["Date"].min().date()
     max_date = date.today()
 
-    start_date = None
-    end_date = None
     date_range = st.date_input(
         "Date range",
         value=[],
@@ -244,20 +276,63 @@ with st.sidebar.form("filters"):
         max_value=max_date,
         format="DD/MM/YYYY"
     )
-        
+
+    start_date = end_date = None
     if len(date_range) == 2:
         start_date, end_date = date_range
-    
-    classes = df['Classification'].dropna().unique()
-    selected_classes = st.multiselect("Select relevent classifications", classes, default=classes)
+
+    # ----- Classification filters -----
+    classes = sorted(df["Classification"].dropna().unique())
+    selected_classes = st.multiselect(
+        "Select relevant classifications",
+        classes,
+        default=classes
+    )
+
+    sub_classes = (
+        df[df["Classification"].isin(selected_classes)]["Sub Classification"]
+        .dropna()
+        .unique()
+    )
+
+    selected_sub_classes = st.multiselect(
+        "Select relevant sub-classifications",
+        sub_classes,
+        default=sub_classes
+    )
 
     submitted = st.form_submit_button("Apply Filters")
 
     if submitted:
         if start_date is None or end_date is None:
-            st.warning("Please select a valid date range .")
+            st.warning("Please select a valid date range.")
         else:
-            st.success(f"Filtering from {start_date} to {end_date}")
+            st.session_state.filters_applied = True
+            st.session_state.start_date = start_date
+            st.session_state.end_date = end_date
+            st.session_state.selected_classes = selected_classes
+            st.session_state.selected_sub_classes = selected_sub_classes
+            st.session_state.selected_lobs = selected_lobs
+            st.session_state.selected_revenue = selected_revenue
+
+
+if not st.session_state.filters_applied:
+    st.info("Please apply filters to continue.")
+    st.stop()
+
+# --------------------------------------------------
+# READ ACTIVE FILTERS FROM SESSION STATE
+# --------------------------------------------------
+start_date = st.session_state.start_date
+end_date = st.session_state.end_date
+selected_classes = st.session_state.selected_classes
+selected_sub_classes = st.session_state.selected_sub_classes
+
+if "LOB" in df.columns:
+    selected_lobs = st.session_state.selected_lobs
+
+if "Revenue" in df.columns:
+    selected_revenue = st.session_state.selected_revenue
 
 # --------------------------------------------------
 # FILTER DATA
@@ -289,6 +364,9 @@ filtered = filtered_nodate[
 ]
 
 filtered  = filtered[filtered['Classification'].isin(selected_classes)]
+
+filtered  = filtered[filtered['Sub Classification'].isin(selected_sub_classes)]
+
 
 # --------------------------------------------------
 # KPI ROW 
@@ -374,9 +452,11 @@ k6.metric("Greatest Decreasing Trend", dec_name or "N/A", delta=dec_delta, delta
 # --------------------------------------------------
 # TABS
 # --------------------------------------------------
-tab_class, tab_trends, tab_movers, tab_geo, tab_customer = st.tabs(
-    ["Classification", "Trends", "Variations", "Geography", "Client"]
-)
+with st.container(border=True):
+    
+    tab_class, tab_trends, tab_movers, tab_geo, tab_customer, tab_csv = st.tabs(
+        ["Classification", "Trends", "Variations", "Geography", "Client","CSV Export"]
+    )
 
 # -----------------------------------------------------------------------------
 # GEOGRAPHY TAB
@@ -429,7 +509,7 @@ with tab_trends:
         
         st.subheader("Historical Trends")
         
-        with st.container(border=True):
+        with st.container(border=False):
         
             granularity_options = ["Daily", "Weekly", "Fortnightly", "Monthly", "Quarterly", "6-Monthly", "Annual"]
             granularity = st.select_slider(
@@ -483,7 +563,7 @@ with tab_trends:
         filter_end = filtered["Date"].max()
         n_days_filter = (filter_end - filter_start).days + 1
         
-        with st.container(border=True):
+        with st.container(border=False):
 
                 
             def_comparison_end = filter_start - timedelta(days=1)
@@ -594,7 +674,7 @@ with tab_movers:
     
     with st.container(border=True):
         
-        with st.container(border=True, height='stretch'):
+        with st.container(border=False, height='stretch'):
             
             # Find and display filter period date range, the data from this range is then compared to the comparison period date range
             filter_start = filtered["Date"].min()
@@ -815,7 +895,7 @@ with tab_class:
 with tab_customer:
     st.header("OFIs by Client")
     
-    with st.container(border=True):
+    with st.container(border=False):
         client_counts = (
             filtered
             .groupby(["ClientID", "Client"])
@@ -825,6 +905,7 @@ with tab_customer:
         )
         
         client_counts = client_counts.reset_index()
+        
                 
         client_counts["label"] = (
             (client_counts.index+1).astype(str) + ".  " + 
@@ -932,9 +1013,91 @@ with tab_customer:
         with st.container(border=True):
             st.dataframe(client_df, width='stretch')
 
+# --------------------------------------------------
+# CSV Export TAB
+# --------------------------------------------------
+    
+    with tab_csv:
+        st.header("Export CSV")
+    
+        export_type = st.radio(
+            "Export type",
+            ["Raw records", "Client summary"],
+            horizontal=True
+        )
+    
+        top_x = st.number_input(
+            "Top X clients (by OFI count)",
+            min_value=1,
+            max_value=500,
+            value=20,
+            step=1
+        )
+    
+        group_cols = []
+    
+        if "LOB" in filtered.columns:
+            if st.checkbox("Group by LOB"):
+                group_cols.append("LOB")
+    
+        if "Revenue" in filtered.columns:
+            if st.checkbox("Group by Revenue"):
+                group_cols.append("Revenue")
+    
+        if export_type == "Client summary":
+         if st.checkbox("Group by Classification"):
+             group_cols.append("Classification")
+
+        
+        def build_export_df(filtered, export_type, top_x, group_cols):
+            if filtered.empty:
+                return pd.DataFrame()
+        
+            # Top X clients by OFI count
+            top_clients = (
+                filtered["ClientID"]
+                .value_counts()
+                .head(top_x)
+                .index
+            )
+        
+            export_df = filtered[filtered["ClientID"].isin(top_clients)].copy()
+        
+            if export_type == "Raw records":
+                return export_df.sort_values("Date")
+        
+            # ---- Client summary export ----
+            group_base = ["ClientID", "Client"] + group_cols
+        
+            summary = (
+                export_df
+                .groupby(group_base)
+                .agg(
+                    OFI_Count=("Date", "count"),
+                    First_OFI=("Date", "min"),
+                    Last_OFI=("Date", "max")
+                )
+                .reset_index()
+                .sort_values("OFI_Count", ascending=False)
+            )
+        
+            return summary
+
+        export_df = build_export_df(filtered, export_type, top_x, group_cols)
+
+        if not export_df.empty:
+            st.download_button(
+                label="Download CSV",
+                data=export_df.to_csv(index=False),
+                file_name="ofi_export.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("No data available for export with current filters.")
+
 
 # --------------------------------------------------
 # DATA PREVIEW
 # --------------------------------------------------
-with st.expander("Data Preview"):
-    st.dataframe(filtered, width='stretch')
+#with st.expander("Data Preview"):
+#    st.dataframe(filtered, width='stretch')
